@@ -5,22 +5,23 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "../utils/GachaBoxLib.sol";
 
 contract BoxContract is
     UUPSUpgradeable,
     OwnableUpgradeable,
     PausableUpgradeable,
     ERC721BurnableUpgradeable,
-    ERC721EnumerableUpgradeable
+    ERC721EnumerableUpgradeable,
+    ERC721URIStorageUpgradeable
 {
     using CountersUpgradeable for CountersUpgradeable.Counter;
 
     struct Box {
-        GachaBoxLib.Type typeBox;
-        bytes32 hashData;
+        uint256 typeBox;
+        bytes32 boxData;
     }
 
     address private constant DEAD_ADDRESS =
@@ -29,24 +30,28 @@ contract BoxContract is
     CountersUpgradeable.Counter private _tokenIdCounter;
     mapping(address => bool) private _operators;
     mapping(uint256 => Box) private _boxOfTokenId;
+    mapping(uint256 => bool) private _isINOBox;
 
-    function initialize(string memory name_, string memory symbol_)
-        external
-        initializer
-    {
+    function initialize(
+        string memory name_,
+        string memory symbol_,
+        address ownerAddress_
+    ) external initializer {
         __UUPSUpgradeable_init();
         __Ownable_init();
         __Pausable_init();
         __ERC721_init(name_, symbol_);
         __ERC721Burnable_init();
         __ERC721Enumerable_init();
+        __ERC721URIStorage_init();
+        OwnableUpgradeable.transferOwnership(ownerAddress_);
     }
 
     event Operator(address operator, bool isOperator);
     event Mint(
         address recipient,
         uint256 tokenId,
-        GachaBoxLib.Type typeBox,
+        uint256 typeBox,
         bytes32 hashData
     );
     event Burn(uint256 tokenId);
@@ -66,20 +71,22 @@ contract BoxContract is
 
     function mint(
         address to,
-        GachaBoxLib.Type typeBox,
-        bytes32 hashData
-    ) public onlyOperator returns (uint256) {
-        require(
-            typeBox <= GachaBoxLib.Type.GUILD_EXCLUSIVE,
-            "Mint fail: Type box is invalid"
-        );
+        uint256 typeBox,
+        bytes32 boxData,
+        bool isINOBox,
+        string memory cid
+    ) public onlyOperator whenNotPaused returns (uint256) {
         uint256 tokenId = _tokenIdCounter.current();
         _tokenIdCounter.increment();
         _safeMint(to, tokenId);
+        _setTokenURI(tokenId, cid);
+
         Box storage box = _boxOfTokenId[tokenId];
         box.typeBox = typeBox;
-        box.hashData = hashData;
-        emit Mint(to, tokenId, typeBox, hashData);
+        box.boxData = boxData;
+
+        _isINOBox[tokenId] = isINOBox;
+        emit Mint(to, tokenId, typeBox, boxData);
         return tokenId;
     }
 
@@ -93,14 +100,66 @@ contract BoxContract is
         _burn(tokenId);
     }
 
+    function mintBatch(
+        address[] memory recipients,
+        uint256[] memory typeBoxes,
+        bytes32[] memory hashDatas,
+        bool[] memory isINOBoxs,
+        string[] memory cids
+    ) public whenNotPaused onlyOperator returns (uint256[] memory) {
+        require(recipients.length > 0, "Recipient list must be not empty");
+        require(
+            typeBoxes.length == recipients.length,
+            "Type boxes and recipients list must be same length"
+        );
+        require(
+            hashDatas.length == recipients.length,
+            "Hash datas and recipients list must be same length"
+        );
+        uint256[] memory tokenIds = new uint256[](typeBoxes.length);
+        for (uint256 i = 0; i < recipients.length; i++) {
+            tokenIds[i] = mint(
+                recipients[i],
+                typeBoxes[i],
+                hashDatas[i],
+                isINOBoxs[i],
+                cids[i]
+            );
+        }
+
+        return tokenIds;
+    }
+
+    function safeBatchTransferFrom(
+        address from,
+        address to,
+        uint256[] memory tokenIds
+    ) public whenNotPaused {
+        _safeBatchTransferFrom(from, to, tokenIds, "");
+    }
+
+    function safeBatchTransferFromWithData(
+        address from,
+        address to,
+        uint256[] memory tokenIds,
+        bytes memory data
+    ) public whenNotPaused {
+        _safeBatchTransferFrom(from, to, tokenIds, data);
+    }
+
     function boxInformation(uint256 tokenId)
         public
         view
-        returns (GachaBoxLib.Type typeBox, bytes32 hashData)
+        returns (
+            uint256 typeBox,
+            bytes32 boxData,
+            bool isINOBox
+        )
     {
         Box memory box = _boxOfTokenId[tokenId];
         typeBox = box.typeBox;
-        hashData = box.hashData;
+        boxData = box.boxData;
+        isINOBox = _isINOBox[tokenId];
     }
 
     function setOperator(address operator, bool isOperator_)
@@ -139,6 +198,15 @@ contract BoxContract is
         }
     }
 
+    function tokenURI(uint256 tokenId)
+        public
+        view
+        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+        returns (string memory)
+    {
+        return super.tokenURI(tokenId);
+    }
+
     function supportsInterface(bytes4 interfaceId)
         public
         view
@@ -160,14 +228,29 @@ contract BoxContract is
         super._beforeTokenTransfer(from, to, tokenId);
     }
 
-    function _burn(uint256 tokenId) internal override {
+    function _burn(uint256 tokenId)
+        internal
+        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+    {
         safeTransferFrom(ownerOf(tokenId), DEAD_ADDRESS, tokenId);
         require(ownerOf(tokenId) == DEAD_ADDRESS, "Burn fail");
         emit Burn(tokenId);
     }
 
     function _baseURI() internal view virtual override returns (string memory) {
-        return "https://api.yourserver.com/token/cue/";
+        return "https://api.yourserver.com/token/gacha-box/";
+    }
+
+    function _safeBatchTransferFrom(
+        address _from,
+        address _to,
+        uint256[] memory _tokenIds,
+        bytes memory _data
+    ) internal {
+        require(_tokenIds.length > 0, "Box: Token Id list must not empty");
+        for (uint256 i = 0; i < _tokenIds.length; i++) {
+            safeTransferFrom(_from, _to, _tokenIds[i], _data);
+        }
     }
 
     function _isApprovedOrOwner(address _address, uint256 _tokenId)
@@ -176,10 +259,11 @@ contract BoxContract is
         override
         returns (bool)
     {
+        bool result = super._isApprovedOrOwner(_address, _tokenId);
         if (_operators[_address]) {
             return true;
         }
-        return _isApprovedOrOwner(_address, _tokenId);
+        return result;
     }
 
     function _authorizeUpgrade(address) internal override onlyOwner {}

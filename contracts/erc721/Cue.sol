@@ -5,25 +5,20 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "../utils/IEnums.sol";
 
 contract CueContract is
     UUPSUpgradeable,
     OwnableUpgradeable,
     PausableUpgradeable,
     ERC721BurnableUpgradeable,
-    ERC721EnumerableUpgradeable
+    ERC721EnumerableUpgradeable,
+    ERC721URIStorageUpgradeable
 {
     using CountersUpgradeable for CountersUpgradeable.Counter;
-
-    enum Rarity {
-        COMMON,
-        MONO,
-        RARE,
-        EXOTIC,
-        LEGEND
-    }
 
     struct Cue {
         uint256 spin;
@@ -33,7 +28,7 @@ contract CueContract is
         uint256 strength;
         uint256 durability;
         bool transmog;
-        Rarity rarity;
+        IEnums.Rarity rarity;
     }
 
     address private constant DEAD_ADDRESS =
@@ -54,13 +49,22 @@ contract CueContract is
         __ERC721_init(name_, symbol_);
         __ERC721Burnable_init();
         __ERC721Enumerable_init();
-
+        __ERC721URIStorage_init();
         OwnableUpgradeable.transferOwnership(ownerAddress_);
     }
 
     event Operator(address operator, bool isOperator);
     event Mint(address recipient, uint256 tokenId);
     event Burn(uint256 tokenId);
+    event UpgradeCue(
+        uint256 tokenId,
+        uint256 spin,
+        uint256 time,
+        uint256 energy,
+        uint256 accurate,
+        uint256 strength,
+        uint256 durability
+    );
 
     modifier onlyOperator() {
         require(_operators[_msgSender()], "Cue: Sender is not operator");
@@ -94,15 +98,21 @@ contract CueContract is
         uint256 energy,
         uint256 accurate,
         uint256 strength,
-        uint256 durability
+        uint256 durability,
+        IEnums.Rarity rarity,
+        bool transmog,
+        string memory cid
     ) public whenNotPaused onlyOperator returns (uint256) {
         require(spin >= 1 && spin <= 30, "Spin is invalid");
         require(time >= 1 && time <= 30, "Time is invalid");
         require(energy >= 5 && energy <= 30, "Energy is invalid");
         require(accurate >= 1 && accurate <= 30, "Accurate is invalid");
         require(strength >= 1 && strength <= 30, "Strength is invalid");
+        require(bytes(cid).length > 0, "CID must be not empty");
+
         uint256 tokenId = _tokenIdCounter.current();
         _safeMint(to, tokenId);
+        _setTokenURI(tokenId, cid);
         Cue storage cue = _cues[tokenId];
         cue.spin = spin;
         cue.time = time;
@@ -110,17 +120,80 @@ contract CueContract is
         cue.accurate = accurate;
         cue.strength = strength;
         cue.durability = durability;
-        cue.transmog = true;
-        cue.rarity = _rarity(
-            cue.spin,
-            cue.time,
-            cue.energy,
-            cue.accurate,
-            cue.strength
-        );
+        cue.transmog = transmog;
+        cue.rarity = rarity;
         _tokenIdCounter.increment();
         emit Mint(to, tokenId);
         return tokenId;
+    }
+
+    function mintBatch(
+        address[] memory recipients,
+        uint256[] memory spins,
+        uint256[] memory times,
+        uint256[] memory energies,
+        uint256[] memory accurates,
+        uint256[] memory strengths,
+        uint256[] memory durabilities,
+        IEnums.Rarity[] memory rarities,
+        bool[] memory transmogs,
+        string[] memory cids
+    ) public whenNotPaused onlyOperator returns (uint256[] memory) {
+        require(recipients.length > 0, "Recipient list must be not empty");
+        require(
+            spins.length == recipients.length,
+            "Spins and recipients list must be same length"
+        );
+        require(
+            times.length == recipients.length,
+            "Times and recipients list must be same length"
+        );
+        require(
+            energies.length == recipients.length,
+            "Energies and recipients list must be same length"
+        );
+        require(
+            accurates.length == recipients.length,
+            "Accurates and recipients list must be same length"
+        );
+        require(
+            strengths.length == recipients.length,
+            "Strengths and recipients list must be same length"
+        );
+        require(
+            durabilities.length == recipients.length,
+            "Durabilities and recipients list must be same length"
+        );
+        require(
+            rarities.length == recipients.length,
+            "Rarities and recipients list must be same length"
+        );
+        require(
+            transmogs.length == recipients.length,
+            "Transmogs and recipients list must be same length"
+        );
+        require(
+            cids.length == recipients.length,
+            "CIDs and recipients list must be same length"
+        );
+
+        uint256[] memory tokenIds = new uint256[](spins.length);
+        for (uint256 i = 0; i < recipients.length; i++) {
+            tokenIds[i] = mint(
+                recipients[i],
+                spins[i],
+                times[i],
+                energies[i],
+                accurates[i],
+                strengths[i],
+                durabilities[i],
+                rarities[i],
+                transmogs[i],
+                cids[i]
+            );
+        }
+
+        return tokenIds;
     }
 
     function burn(uint256 tokenId)
@@ -133,6 +206,50 @@ contract CueContract is
         _burn(tokenId);
     }
 
+    function safeBatchTransferFrom(
+        address from,
+        address to,
+        uint256[] memory tokenIds
+    ) public whenNotPaused {
+        _safeBatchTransferFrom(from, to, tokenIds, "");
+    }
+
+    function safeBatchTransferFromWithData(
+        address from,
+        address to,
+        uint256[] memory tokenIds,
+        bytes memory data
+    ) public whenNotPaused {
+        _safeBatchTransferFrom(from, to, tokenIds, data);
+    }
+
+    function upgradeCue(
+        uint256 tokenId,
+        uint256 spin,
+        uint256 time,
+        uint256 energy,
+        uint256 accurate,
+        uint256 strength,
+        uint256 durability
+    ) public whenNotPaused onlyOperator {
+        Cue storage cue = _cues[tokenId];
+        cue.spin = spin;
+        cue.time = time;
+        cue.energy = energy;
+        cue.accurate = accurate;
+        cue.strength = strength;
+        cue.durability = durability;
+        emit UpgradeCue(
+            tokenId,
+            spin,
+            time,
+            energy,
+            accurate,
+            strength,
+            durability
+        );
+    }
+
     function cueInformation(uint256 tokenId)
         external
         view
@@ -142,7 +259,7 @@ contract CueContract is
             uint256 energy,
             uint256 accurate,
             uint256 strength,
-            Rarity rarity,
+            IEnums.Rarity rarity,
             uint256 durability,
             bool transmog
         )
@@ -182,6 +299,15 @@ contract CueContract is
         }
     }
 
+    function tokenURI(uint256 tokenId)
+        public
+        view
+        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+        returns (string memory)
+    {
+        return super.tokenURI(tokenId);
+    }
+
     function supportsInterface(bytes4 interfaceId)
         public
         view
@@ -203,7 +329,10 @@ contract CueContract is
         super._beforeTokenTransfer(from, to, tokenId);
     }
 
-    function _burn(uint256 tokenId) internal override {
+    function _burn(uint256 tokenId)
+        internal
+        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+    {
         safeTransferFrom(ownerOf(tokenId), DEAD_ADDRESS, tokenId);
         require(ownerOf(tokenId) == DEAD_ADDRESS, "Burn fail");
         emit Burn(tokenId);
@@ -213,31 +342,29 @@ contract CueContract is
         return "https://api.yourserver.com/token/cue/";
     }
 
-    function _rarity(
-        uint256 spin,
-        uint256 time,
-        uint256 energy,
-        uint256 accurate,
-        uint256 strength
-    ) internal pure returns (Rarity) {
-        uint256 sumAllStats = spin + time + energy + accurate + strength;
-        uint256 statsAverage = sumAllStats / 5;
-        if (statsAverage < 8) {
-            return Rarity.COMMON;
+    function _safeBatchTransferFrom(
+        address _from,
+        address _to,
+        uint256[] memory _tokenIds,
+        bytes memory _data
+    ) internal {
+        require(_tokenIds.length > 0, "Cue: Token Id list must not empty");
+        for (uint256 i = 0; i < _tokenIds.length; i++) {
+            safeTransferFrom(_from, _to, _tokenIds[i], _data);
         }
-        if (statsAverage < 14) {
-            return Rarity.MONO;
+    }
+
+    function _isApprovedOrOwner(address _address, uint256 _tokenId)
+        internal
+        view
+        override
+        returns (bool)
+    {
+        bool result = super._isApprovedOrOwner(_address, _tokenId);
+        if (_operators[_address]) {
+            return true;
         }
-        if (statsAverage < 20) {
-            return Rarity.RARE;
-        }
-        if (statsAverage < 24) {
-            return Rarity.EXOTIC;
-        }
-        if (statsAverage <= 30) {
-            return Rarity.LEGEND;
-        }
-        revert("Stats is invalid");
+        return result;
     }
 
     function _authorizeUpgrade(address) internal override onlyOwner {}

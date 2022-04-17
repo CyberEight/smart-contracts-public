@@ -20,7 +20,7 @@ contract BreakToken is
     function initialize(
         string memory name_,
         string memory symbol_,
-        address ownerAddress
+        address ownerAddress_
     ) public initializer {
         __UUPSUpgradeable_init();
         __Ownable_init();
@@ -28,7 +28,7 @@ contract BreakToken is
         __ERC20_init(name_, symbol_);
         __ERC20Burnable_init();
 
-        OwnableUpgradeable.transferOwnership(ownerAddress);
+        OwnableUpgradeable.transferOwnership(ownerAddress_);
     }
 
     event Operator(address operator, bool isOperator);
@@ -36,11 +36,6 @@ contract BreakToken is
 
     modifier onlyOperator() {
         require(_operators[msg.sender], "BreakToken: Sender is not operator");
-        _;
-    }
-
-    modifier approvalNotRequiredForOperator(address spender) {
-        _approvalNotRequiredForOperator(spender);
         _;
     }
 
@@ -96,7 +91,6 @@ contract BreakToken is
         virtual
         override
         whenNotPaused
-        approvalNotRequiredForOperator(spender)
         returns (bool)
     {
         return super.approve(spender, amount);
@@ -107,7 +101,6 @@ contract BreakToken is
         virtual
         override
         whenNotPaused
-        approvalNotRequiredForOperator(spender)
         returns (bool)
     {
         return super.increaseAllowance(spender, addedValue);
@@ -118,7 +111,6 @@ contract BreakToken is
         virtual
         override
         whenNotPaused
-        approvalNotRequiredForOperator(spender)
         returns (bool)
     {
         return super.decreaseAllowance(spender, subtractedValue);
@@ -137,24 +129,5 @@ contract BreakToken is
         super.burnFrom(account, amount);
     }
 
-    function allowance(address owner, address spender)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
-        if (_operators[spender] && spender.isContract()) {
-            return balanceOf(owner);
-        }
-        return super.allowance(owner, spender);
-    }
-
     function _authorizeUpgrade(address) internal override onlyOwner {}
-
-    function _approvalNotRequiredForOperator(address spender) private view {
-        if (_operators[spender] && spender.isContract()) {
-            revert("Approval is not required for operators");
-        }
-    }
 }

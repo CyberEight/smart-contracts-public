@@ -4,9 +4,10 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Capped.sol";
 import "../utils/IBotProtection.sol";
 
-contract ESPNToken is Ownable, Pausable, ERC20Burnable {
+contract ESPNToken is Ownable, Pausable, ERC20Burnable, ERC20Capped {
     IBotProtection public botProtectionContract;
     bool public botProtectionEnabled;
 
@@ -15,9 +16,8 @@ contract ESPNToken is Ownable, Pausable, ERC20Burnable {
         string memory symbol_,
         uint256 maxSupply_,
         address ownerAddress_
-    ) Ownable() Pausable() ERC20(name_, symbol_) {
+    ) Ownable() Pausable() ERC20(name_, symbol_) ERC20Capped(maxSupply_) {
         Ownable.transferOwnership(ownerAddress_);
-        _mint(ownerAddress_, maxSupply_);
         _pause();
     }
 
@@ -29,13 +29,13 @@ contract ESPNToken is Ownable, Pausable, ERC20Burnable {
         uint256 indexed amount
     );
 
-    modifier isBotProtectEnable(
+    modifier botProtectIfEnabled(
         address sender,
         address recipient,
         uint256 amount
     ) {
         if (botProtectionEnabled) {
-            botProtectionContract.protect(recipient, amount);
+            botProtectionContract.protect(sender, recipient, amount);
             emit BotProtectionTransfer(sender, recipient, amount);
         }
         _;
@@ -70,12 +70,16 @@ contract ESPNToken is Ownable, Pausable, ERC20Burnable {
         emit BotProtectionEnabled(enabled);
     }
 
+    function mint(address account, uint256 amount) external onlyOwner {
+        _mint(account, amount);
+    }
+
     function transfer(address to, uint256 amount)
         public
         virtual
         override
         whenNotPaused
-        isBotProtectEnable(_msgSender(), to, amount)
+        botProtectIfEnabled(_msgSender(), to, amount)
         returns (bool)
     {
         return super.transfer(to, amount);
@@ -90,7 +94,7 @@ contract ESPNToken is Ownable, Pausable, ERC20Burnable {
         virtual
         override
         whenNotPaused
-        isBotProtectEnable(from, to, amount)
+        botProtectIfEnabled(from, to, amount)
         returns (bool)
     {
         return super.transferFrom(from, to, amount);
@@ -137,5 +141,13 @@ contract ESPNToken is Ownable, Pausable, ERC20Burnable {
         whenNotPaused
     {
         super.burnFrom(account, amount);
+    }
+
+    function _mint(address account, uint256 amount)
+        internal
+        virtual
+        override(ERC20, ERC20Capped)
+    {
+        ERC20Capped._mint(account, amount);
     }
 }
