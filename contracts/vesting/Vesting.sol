@@ -21,7 +21,7 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
         uint256 startTs;
         // epoch end timestamp, in seconds
         uint256 endTs;
-        // the length of the whole vesting scheme, in seconds
+        // the length of the whole subscription scheme, in seconds
         uint256 duration;
         // the length of time for each period, in seconds
         uint256 period;
@@ -85,7 +85,7 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
     );
     event SchemeActivated(uint256 schemeId, bool isActive);
     event SubscriptionAdded(
-        uint256 vestingId,
+        uint256 subscriptionID,
         uint256 schemeId,
         address wallet,
         uint256 cliffTime,
@@ -97,10 +97,10 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
         uint256 depositAmount,
         bool isActive
     );
-    event SubscriptionDisabled(uint256 vestingId);
+    event SubscriptionDisabled(uint256 subscriptionID);
     event ClaimSucceeded(
         address wallet,
-        uint256[] vestingIds,
+        uint256[] subscriptionIDs,
         uint256[] claimableAmounts,
         uint256 totalClaimableAmount
     );
@@ -267,10 +267,10 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
         Scheme memory scheme = _schemes[schemeId];
         subscriptionCount.increment();
 
-        uint256 vestingId = subscriptionCount.current();
-        _participatedSubscriptionIDs[wallet].push(vestingId);
+        uint256 subscriptionID = subscriptionCount.current();
+        _participatedSubscriptionIDs[wallet].push(subscriptionID);
 
-        Subscription storage subscription = _subscriptions[vestingId];
+        Subscription storage subscription = _subscriptions[subscriptionID];
         subscription.schemeId = schemeId;
         subscription.wallet = wallet;
         subscription.cliffPeriod = scheme.cliffPeriod;
@@ -302,7 +302,7 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
         }
 
         emit SubscriptionAdded(
-            vestingId,
+            subscriptionID,
             schemeId,
             wallet,
             subscription.cliffPeriod,
@@ -395,15 +395,15 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
         );
     }
 
-    function disableVesting(uint256 vestingId) external onlyOperator {
+    function disableVesting(uint256 subscriptionID) external onlyOperator {
         require(
-            vestingId >= 1 && vestingId <= subscriptionCount.current(),
-            "Vesting Id is invalid"
+            subscriptionID >= 1 && subscriptionID <= subscriptionCount.current(),
+            "Subscription ID is invalid"
         );
-        Subscription storage vesting = _subscriptions[vestingId];
-        vesting.isActive = false;
+        Subscription storage subscription = _subscriptions[subscriptionID];
+        subscription.isActive = false;
 
-        emit SubscriptionDisabled(vestingId);
+        emit SubscriptionDisabled(subscriptionID);
     }
 
     function isOperator(address operator) external view returns (bool) {
@@ -457,7 +457,7 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
         isActive = scheme.isActive;
     }
 
-    function getSubscription(uint256 vestingId)
+    function getSubscription(uint256 subscriptionID)
         external
         view
         returns (
@@ -475,19 +475,19 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
             bool isActive
         )
     {
-        Subscription memory vesting = _subscriptions[vestingId];
-        schemeId = vesting.schemeId;
-        wallet = vesting.wallet;
-        cliffTime = vesting.cliffPeriod;
-        startTime = vesting.startTs;
-        durationTime = vesting.duration;
-        endTime = vesting.endTs;
-        periodTime = vesting.period;
-        totalVestingAmount = vesting.totalVestingAmount;
-        periodVestingAmount = vesting.periodVestingAmount;
-        vestedAmount = vesting.vestedAmount;
-        availableAmount = _getAvailableAmount(vestingId);
-        isActive = vesting.isActive;
+        Subscription memory subscription = _subscriptions[subscriptionID];
+        schemeId = subscription.schemeId;
+        wallet = subscription.wallet;
+        cliffTime = subscription.cliffPeriod;
+        startTime = subscription.startTs;
+        durationTime = subscription.duration;
+        endTime = subscription.endTs;
+        periodTime = subscription.period;
+        totalVestingAmount = subscription.totalVestingAmount;
+        periodVestingAmount = subscription.periodVestingAmount;
+        vestedAmount = subscription.vestedAmount;
+        availableAmount = _getAvailableAmount(subscriptionID);
+        isActive = subscription.isActive;
     }
 
     function emergencyWithdraw() external whenPaused onlyOwner {
@@ -521,10 +521,10 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
                 uint256 availableAmount = _getAvailableAmount(
                     _subscriptionIDs[i]
                 );
-                Subscription storage vesting = _subscriptions[
+                Subscription storage subscription = _subscriptions[
                     _subscriptionIDs[i]
                 ];
-                vesting.vestedAmount += availableAmount;
+                subscription.vestedAmount += availableAmount;
 
                 availableSubscriptionIDs[index] = _subscriptionIDs[i];
                 claimableAmounts[index] = availableAmount;
@@ -568,33 +568,33 @@ contract Vesting is Ownable, Pausable, ReentrancyGuard {
             _getAvailableAmount(_subscriptionID) != 0);
     }
 
-    function _getAvailableAmount(uint256 _vestingId)
+    function _getAvailableAmount(uint256 _subscriptionID)
         internal
         view
         returns (uint256 availableAmount)
     {
-        Subscription memory vesting = _subscriptions[_vestingId];
-        if (block.timestamp < vesting.startTs || !vesting.isActive) {
+        Subscription memory subscription = _subscriptions[_subscriptionID];
+        if (block.timestamp < subscription.startTs || !subscription.isActive) {
             availableAmount = 0;
-        } else if (block.timestamp < vesting.endTs) {
-            if (vesting.vestedAmount == vesting.totalVestingAmount) {
+        } else if (block.timestamp < subscription.endTs) {
+            if (subscription.vestedAmount == subscription.totalVestingAmount) {
                 return 0;
             }
-            uint256 currentDurationTime = block.timestamp - vesting.startTs;
-            uint256 currentPeriod = currentDurationTime / vesting.period + 1;
+            uint256 currentDurationTime = block.timestamp - subscription.startTs;
+            uint256 currentPeriod = currentDurationTime / subscription.period + 1;
             uint256 claimableAmount = currentPeriod *
-                vesting.periodVestingAmount;
+                subscription.periodVestingAmount;
 
-            availableAmount = claimableAmount <= vesting.vestedAmount
+            availableAmount = claimableAmount <= subscription.vestedAmount
                 ? 0
-                : claimableAmount - vesting.vestedAmount;
-            if (block.timestamp + vesting.period > vesting.endTs) {
+                : claimableAmount - subscription.vestedAmount;
+            if (block.timestamp + subscription.period > subscription.endTs) {
                 availableAmount =
-                    vesting.totalVestingAmount -
-                    vesting.vestedAmount;
+                    subscription.totalVestingAmount -
+                    subscription.vestedAmount;
             }
         } else {
-            availableAmount = vesting.totalVestingAmount - vesting.vestedAmount;
+            availableAmount = subscription.totalVestingAmount - subscription.vestedAmount;
         }
     }
 
