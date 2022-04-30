@@ -143,7 +143,7 @@ contract CardContract is
         return (
             string(
                 abi.encodePacked(
-                    "https://api.yourserver.com/token/card/", // TODO: update base URI
+                    "https://ipfs.cyberium.world/ipfs/",
                     StringsUpgradeable.toString(tokenId)
                 )
             )
