@@ -27,6 +27,8 @@ contract BoxContract is
     address private constant DEAD_ADDRESS =
         0x000000000000000000000000000000000000dEaD;
 
+    string public baseURI;
+
     CountersUpgradeable.Counter private _tokenIdCounter;
     mapping(address => bool) private _operators;
     mapping(uint256 => Box) private _boxOfTokenId;
@@ -52,9 +54,27 @@ contract BoxContract is
         address recipient,
         uint256 tokenId,
         uint256 typeBox,
-        bytes32 hashData
+        bytes32 hashData,
+        string cid
     );
     event Burn(uint256 tokenId);
+    event MintBatch(
+        address[] recipients,
+        uint256[] tokenIds,
+        uint256[] typeBoxes,
+        bytes32[] hashDatas,
+        string[] cids
+    );
+    event TransferBatchToSingleAddress(
+        address from,
+        address to,
+        uint256[] tokenIds
+    );
+    event TransferBatchToMultipleAddress(
+        address from,
+        address[] tos,
+        uint256[] tokenIds
+    );
 
     modifier onlyOperator() {
         require(_operators[_msgSender()], "Box: Sender is not operator");
@@ -86,7 +106,7 @@ contract BoxContract is
         box.boxData = boxData;
 
         _isINOBox[tokenId] = isINOBox;
-        emit Mint(to, tokenId, typeBox, boxData);
+        emit Mint(to, tokenId, typeBox, boxData, cid);
         return tokenId;
     }
 
@@ -103,7 +123,7 @@ contract BoxContract is
     function mintBatch(
         address[] memory recipients,
         uint256[] memory typeBoxes,
-        bytes32[] memory hashDatas,
+        bytes32[] memory boxDatas,
         bool[] memory isINOBoxs,
         string[] memory cids
     ) public whenNotPaused onlyOperator returns (uint256[] memory) {
@@ -113,20 +133,21 @@ contract BoxContract is
             "Type boxes and recipients list must be same length"
         );
         require(
-            hashDatas.length == recipients.length,
-            "Hash datas and recipients list must be same length"
+            boxDatas.length == recipients.length,
+            "Box datas and recipients list must be same length"
         );
         uint256[] memory tokenIds = new uint256[](typeBoxes.length);
         for (uint256 i = 0; i < recipients.length; i++) {
             tokenIds[i] = mint(
                 recipients[i],
                 typeBoxes[i],
-                hashDatas[i],
+                boxDatas[i],
                 isINOBoxs[i],
                 cids[i]
             );
         }
 
+        emit MintBatch(recipients, tokenIds, typeBoxes, boxDatas, cids);
         return tokenIds;
     }
 
@@ -147,6 +168,27 @@ contract BoxContract is
         _safeBatchTransferFrom(from, to, tokenIds, data);
     }
 
+    function batchTransferToMultipleAddress(
+        address from,
+        address[] memory tos,
+        uint256[] memory tokenIds
+    ) public whenNotPaused {
+        _batchTransferToMultipleAddress(from, tos, tokenIds, "");
+    }
+
+    function batchTransferToMultipleAddressWithData(
+        address from,
+        address[] memory tos,
+        uint256[] memory tokenIds,
+        bytes memory data
+    ) public whenNotPaused {
+        _batchTransferToMultipleAddress(from, tos, tokenIds, data);
+    }
+
+    function setBaseURI(string memory uri) external onlyOwner {
+        baseURI = uri;
+    }
+
     function boxInformation(uint256 tokenId)
         public
         view
@@ -157,9 +199,13 @@ contract BoxContract is
         )
     {
         Box memory box = _boxOfTokenId[tokenId];
-        typeBox = box.typeBox;
         boxData = box.boxData;
         isINOBox = _isINOBox[tokenId];
+        typeBox = box.typeBox;
+        // 1000 is prefix of box INO
+        if (isINOBox) {
+            typeBox = 1000 + box.typeBox;
+        }
     }
 
     function setOperator(address operator, bool isOperator_)
@@ -238,7 +284,7 @@ contract BoxContract is
     }
 
     function _baseURI() internal view virtual override returns (string memory) {
-        return "https://api.yourserver.com/token/gacha-box/";
+        return baseURI;
     }
 
     function _safeBatchTransferFrom(
@@ -251,6 +297,24 @@ contract BoxContract is
         for (uint256 i = 0; i < _tokenIds.length; i++) {
             safeTransferFrom(_from, _to, _tokenIds[i], _data);
         }
+        emit TransferBatchToSingleAddress(_from, _to, _tokenIds);
+    }
+
+    function _batchTransferToMultipleAddress(
+        address _from,
+        address[] memory _tos,
+        uint256[] memory _tokenIds,
+        bytes memory _data
+    ) internal {
+        require(_tokenIds.length > 0, "Box: Token Id list must not empty");
+        require(
+            _tos.length == _tokenIds.length,
+            "Box: Recipient and tokenId list must be same length"
+        );
+        for (uint256 i = 0; i < _tokenIds.length; i++) {
+            safeTransferFrom(_from, _tos[i], _tokenIds[i], _data);
+        }
+        emit TransferBatchToMultipleAddress(_from, _tos, _tokenIds);
     }
 
     function _isApprovedOrOwner(address _address, uint256 _tokenId)

@@ -34,6 +34,8 @@ contract CueContract is
     address private constant DEAD_ADDRESS =
         0x000000000000000000000000000000000000dEaD;
 
+    string public baseURI;
+
     CountersUpgradeable.Counter private _tokenIdCounter;
     mapping(address => bool) private _operators;
     mapping(uint256 => Cue) private _cues;
@@ -57,13 +59,23 @@ contract CueContract is
     event Mint(address recipient, uint256 tokenId);
     event Burn(uint256 tokenId);
     event UpgradeCue(
-        uint256 tokenId,
-        uint256 spin,
-        uint256 time,
-        uint256 energy,
-        uint256 accurate,
-        uint256 strength,
-        uint256 durability
+        uint256[] tokenIds,
+        uint256[] spins,
+        uint256[] times,
+        uint256[] energies,
+        uint256[] accurates,
+        uint256[] strengths,
+        uint256[] durabilities
+    );
+    event TransferBatchToSingleAddress(
+        address from,
+        address to,
+        uint256[] tokenIds
+    );
+    event TransferBatchToMultipleAddress(
+        address from,
+        address[] tos,
+        uint256[] tokenIds
     );
 
     modifier onlyOperator() {
@@ -223,30 +235,78 @@ contract CueContract is
         _safeBatchTransferFrom(from, to, tokenIds, data);
     }
 
+    function batchTransferToMultipleAddress(
+        address from,
+        address[] memory tos,
+        uint256[] memory tokenIds
+    ) public whenNotPaused {
+        _batchTransferToMultipleAddress(from, tos, tokenIds, "");
+    }
+
+    function batchTransferToMultipleAddressWithData(
+        address from,
+        address[] memory tos,
+        uint256[] memory tokenIds,
+        bytes memory data
+    ) public whenNotPaused {
+        _batchTransferToMultipleAddress(from, tos, tokenIds, data);
+    }
+
+    function setBaseURI(string memory uri) external onlyOwner {
+        baseURI = uri;
+    }
+
     function upgradeCue(
-        uint256 tokenId,
-        uint256 spin,
-        uint256 time,
-        uint256 energy,
-        uint256 accurate,
-        uint256 strength,
-        uint256 durability
+        uint256[] memory tokenIds,
+        uint256[] memory spins,
+        uint256[] memory times,
+        uint256[] memory energies,
+        uint256[] memory accurates,
+        uint256[] memory strengths,
+        uint256[] memory durabilities
     ) public whenNotPaused onlyOperator {
-        Cue storage cue = _cues[tokenId];
-        cue.spin = spin;
-        cue.time = time;
-        cue.energy = energy;
-        cue.accurate = accurate;
-        cue.strength = strength;
-        cue.durability = durability;
+        require(tokenIds.length > 0, "Token Id list must be not empty");
+        require(
+            spins.length == tokenIds.length,
+            "Spins and tokenIds list must be same length"
+        );
+        require(
+            times.length == tokenIds.length,
+            "Times and tokenIds list must be same length"
+        );
+        require(
+            energies.length == tokenIds.length,
+            "Energies and tokenIds list must be same length"
+        );
+        require(
+            accurates.length == tokenIds.length,
+            "Accurates and tokenIds list must be same length"
+        );
+        require(
+            strengths.length == tokenIds.length,
+            "Strengths and tokenIds list must be same length"
+        );
+        require(
+            durabilities.length == tokenIds.length,
+            "Durabilities and tokenIds list must be same length"
+        );
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            Cue storage cue = _cues[tokenIds[i]];
+            cue.spin = spins[i];
+            cue.time = times[i];
+            cue.energy = energies[i];
+            cue.accurate = accurates[i];
+            cue.strength = strengths[i];
+            cue.durability = durabilities[i];
+        }
         emit UpgradeCue(
-            tokenId,
-            spin,
-            time,
-            energy,
-            accurate,
-            strength,
-            durability
+            tokenIds,
+            spins,
+            times,
+            energies,
+            accurates,
+            strengths,
+            durabilities
         );
     }
 
@@ -339,7 +399,7 @@ contract CueContract is
     }
 
     function _baseURI() internal view virtual override returns (string memory) {
-        return "https://api.yourserver.com/token/cue/";
+        return baseURI;
     }
 
     function _safeBatchTransferFrom(
@@ -352,6 +412,24 @@ contract CueContract is
         for (uint256 i = 0; i < _tokenIds.length; i++) {
             safeTransferFrom(_from, _to, _tokenIds[i], _data);
         }
+        emit TransferBatchToSingleAddress(_from, _to, _tokenIds);
+    }
+
+    function _batchTransferToMultipleAddress(
+        address _from,
+        address[] memory _tos,
+        uint256[] memory _tokenIds,
+        bytes memory _data
+    ) internal {
+        require(_tokenIds.length > 0, "Cue: Token Id list must not empty");
+        require(
+            _tos.length == _tokenIds.length,
+            "Cue: Recipient and tokenId list must be same length"
+        );
+        for (uint256 i = 0; i < _tokenIds.length; i++) {
+            safeTransferFrom(_from, _tos[i], _tokenIds[i], _data);
+        }
+        emit TransferBatchToMultipleAddress(_from, _tos, _tokenIds);
     }
 
     function _isApprovedOrOwner(address _address, uint256 _tokenId)

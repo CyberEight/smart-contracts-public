@@ -19,6 +19,8 @@ contract CardContract is
 
     mapping(address => bool) private _operators;
 
+    string public baseURI;
+    
     function initialize(address ownerAddress_) public initializer {
         __UUPSUpgradeable_init();
         __Ownable_init();
@@ -127,6 +129,10 @@ contract CardContract is
         return result;
     }
 
+    function setBaseURI(string memory newBaseURI) external onlyOwner {
+        baseURI = newBaseURI;
+    }
+
     function setOperator(address operator, bool isOperator_)
         external
         onlyOwner
@@ -139,11 +145,11 @@ contract CardContract is
         return _operators[operator];
     }
 
-    function uri(uint256 tokenId) public pure override returns (string memory) {
+    function uri(uint256 tokenId) public view override returns (string memory) {
         return (
             string(
                 abi.encodePacked(
-                    "https://ipfs.cyberium.world/ipfs/",
+                    baseURI,
                     StringsUpgradeable.toString(tokenId)
                 )
             )
